@@ -210,6 +210,73 @@
         src: "{{ install_dir }}/wgrib2.tgz"
         dest: "{{ install_dir }}"
         remote_src: yes
+
+    - name: Create build directory
+      file:
+        path: "{{ install_dir }}/wgrib2-{{ wgrib2_version }}/build"
+        state: directory
+        mode: '0755'
+
+    - name: Run CMake to generate wgrib2 build system
+      shell: |
+            export g2c_DIR={{ nceplibs_g2c_path }}/lib/cmake/g2c
+            export CFLAGS="-I{{ nceplibs_g2c_path }}/include"
+            export CPPFLAGS="-I{{ nceplibs_g2c_path }}/include"
+            cd {{ install_dir }}/wgrib2-{{ wgrib2_version }}/build
+            cmake -DCMAKE_INSTALL_PREFIX={{ nceplibs_ip_path }} \
+                  -DCMAKE_PREFIX_PATH="{{ nceplibs_g2_path }};{{ nceplibs_g2c_path }};{{ nceplibs_ip_path }};{{ jasper_install_dir }}" \
+                  -DUSE_JASPER=ON \
+                  -DUSE_IPOLATES=ON \
+                  -DUSE_AEC=ON \
+                  -DCMAKE_BUILD_TYPE=Release .. > /tmp/wgrib2_build.log 2>&1
+      args:
+        executable: /bin/bash
+
+    - name: Run make to build wgrib2
+      community.general.make:
+        chdir: "{{ install_dir }}/wgrib2-{{ wgrib2_version }}/build"
+
+    - name: Run make install to install wgrib2
+      community.general.make:
+        chdir: "{{ install_dir }}/wgrib2-{{ wgrib2_version }}/build"
+        target: install
+
+    - name: Ensure wgrib2 compiled successfully
+      stat:
+        path: "{{ install_dir }}/wgrib2-{{ wgrib2_version }}/build/wgrib2"
+      register: wgrib2_bin
+
+    - name: Compile gmerge separately
+      shell: |
+        cd {{ install_dir }}/wgrib2-{{ wgrib2_version }}/aux_progs
+        make -f gmerge.make
+      args:
+        executable: /bin/bash
+
+    - name: Copy wgrib2 binary to /usr/local/bin
+      copy:
+        src: "{{ install_dir }}/wgrib2-{{ wgrib2_version }}/build/wgrib2/wgrib2"
+        dest: "{{ bin_dir }}/wgrib2"
+        mode: '0755'
+        remote_src: yes
+      when: wgrib2_bin.stat.exists
+
+    - name: Copy gmerge binary to /usr/local/bin
+      copy:
+        src: "{{ install_dir }}/wgrib2-{{ wgrib2_version }}/aux_progs/gmerge"
+        dest: "{{ bin_dir }}/gmerge"
+        mode: '0755'
+        remote_src: yes
+
+    - name: Verify installation
+      command: "wgrib2 --version"
+      register: wgrib2_test
+      changed_when: false
+      ignore_errors: yes
+
+    - name: Show wgrib2 test output
+      debug:
+        msg: "{{ wgrib2_test.stdout }}"
         
     # Step 7: Clean up
     - name: Find NCEPLIBS temporary directories
