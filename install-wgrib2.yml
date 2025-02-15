@@ -1,0 +1,265 @@
+---
+- name: Install wgrib2
+  hosts: all
+  become: yes
+  vars:
+    wgrib2_version: "3.5.0"
+    nceplibs_g2c_version: "2.1.0"
+    nceplibs_g2_version: "4.0.0"
+    nceplibs_bacio_version: "2.6.0"
+    nceplibs_ip_version: "5.2.0"
+    jasper_version: "4.2.4"
+    # 
+    base_source_dir: "/usr/local/src"
+    jasper_source_dir: "{{ base_source_dir }}/jasper-version-{{ jasper_version }}"
+    jasper_build_dir: "{{ base_source_dir }}/jasper-version-{{ jasper_version }}-build"  # MUST be outside Jasper source directory!
+    jasper_install_dir: "/usr/local"
+    nceplibs_g2c_path: "{{ base_source_dir }}/NCEPLIBS-g2c-{{ nceplibs_g2c_version }}"
+    nceplibs_g2_path: "{{ base_source_dir }}/NCEPLIBS-g2-{{ nceplibs_g2_version }}"
+    nceplibs_bacio_path: "{{ base_source_dir }}/NCEPLIBS-bacio-{{ nceplibs_bacio_version }}"
+    nceplibs_ip_path: "{{ base_source_dir }}/NCEPLIBS-ip-{{ nceplibs_ip_version }}"
+    install_dir: "{{ base_source_dir }}/wgrib2"
+    bin_dir: "/usr/local/bin"
+
+  tasks:
+    - name: Install dependencies
+      apt:
+        name:
+          - build-essential
+          - cmake
+          - gfortran
+          - libaec-dev
+          - libblas-dev
+          - liblapack-dev
+          - libnetcdf-dev
+          - libpng-dev
+          - make
+          - m4
+          - zlib1g-dev
+        state: present
+        update_cache: yes
+
+    # Step 1: Compile and Install Jasper
+    - name: Download and extract Jasper
+      get_url:
+        url: "https://github.com/jasper-software/jasper/archive/refs/tags/version-{{ jasper_version }}.tar.gz"
+        dest: "/tmp/jasper-{{ jasper_version }}.tar.gz"
+
+    - name: Extract Jasper
+      unarchive:
+        src: "/tmp/jasper-{{ jasper_version }}.tar.gz"
+        dest: "{{ base_source_dir }}"
+        remote_src: yes
+
+    - name: Create build directory for Jasper
+      file:
+        path: "{{ jasper_build_dir }}"
+        state: directory
+
+    - name: Configure Jasper with CMake
+      shell: |
+        cmake -H{{ jasper_source_dir }} -B{{ jasper_build_dir }} -DCMAKE_INSTALL_PREFIX={{ jasper_install_dir }}
+      args:
+        executable: /bin/bash
+
+    - name: Build Jasper
+      shell: |
+        cmake --build {{ jasper_build_dir }}
+      args:
+        executable: /bin/bash
+
+    # - name: Run Jasper test suite
+    #   shell: |
+    #     cd {{ jasper_build_dir }}
+    #     ctest --output-on-failure
+    #   args:
+    #     executable: /bin/bash
+    #   ignore_errors: yes  # Allow the playbook to continue even if tests fail
+
+    - name: Install Jasper
+      shell: |
+        cmake --build {{ jasper_build_dir }} --target install
+      args:
+        executable: /bin/bash
+
+    # This avoids a "missing link" issue
+    - name: Ensure /usr/local/lib is in ld.so.conf
+      copy:
+        dest: /etc/ld.so.conf.d/usr-local-lib.conf
+        content: "/usr/local/lib\n"
+        mode: "0644"
+
+    - name: Reload dynamic linker cache
+      command: ldconfig
+
+    # Step 2: Download and install NCEPLIBS-ip
+    - name: Ensure NCEPLIBS-ip directory exists
+      file:
+        path: "{{ nceplibs_ip_path }}"
+        state: directory
+        mode: '0755'
+
+    - name: Download NCEPLIBS-ip tarball
+      get_url:
+        url: "https://github.com/NOAA-EMC/NCEPLIBS-ip/archive/refs/tags/v{{ nceplibs_ip_version }}.tar.gz"
+        dest: "/tmp/NCEPLIBS-ip-{{ nceplibs_ip_version }}.tar.gz"
+
+    - name: Extract NCEPLIBS-ip tarball
+      unarchive:
+        src: "/tmp/NCEPLIBS-ip-{{ nceplibs_ip_version }}.tar.gz"
+        dest: "{{ base_source_dir }}/"
+        remote_src: yes
+
+    - name: Compile and install NCEPLIBS-ip
+      shell: |
+        mkdir -p {{ nceplibs_ip_path }}/build
+        cd {{ nceplibs_ip_path }}/build
+        cmake -DCMAKE_INSTALL_PREFIX={{ nceplibs_ip_path }} ..
+        make
+        make install
+      args:
+        creates: "{{ nceplibs_ip_path }}/lib"
+
+    # Step 3: Download and install NCEPLIBS-g2c
+    - name: Ensure NCEPLIBS-g2c directory exists
+      file:
+        path: "{{ nceplibs_g2c_path }}"
+        state: directory
+        mode: '0755'
+
+    - name: Download NCEPLIBS-g2c tarball
+      get_url:
+        url: "https://github.com/NOAA-EMC/NCEPLIBS-g2c/archive/refs/tags/v{{ nceplibs_g2c_version }}.tar.gz"
+        dest: "/tmp/NCEPLIBS-g2c-{{ nceplibs_g2c_version }}.tar.gz"
+
+    - name: Extract NCEPLIBS-g2c tarball
+      unarchive:
+        src: "/tmp/NCEPLIBS-g2c-{{ nceplibs_g2c_version }}.tar.gz"
+        dest: "/usr/local/src"
+        remote_src: yes
+
+    - name: Compile and install NCEPLIBS-g2c
+      shell: |
+        mkdir -p {{ nceplibs_g2c_path }}/build
+        cd {{ nceplibs_g2c_path }}/build
+        cmake -DCMAKE_INSTALL_PREFIX={{ nceplibs_g2c_path }} -DUSE_Jasper=ON -DJasper_DIR={{ jasper_install_dir }} -DUSE_AEC=ON .. > /tmp/g2c_build.log 2>&1
+        make > /tmp/g2c_make.log 2>&1
+        make install > /tmp/g2c_install.log 2>&1
+      args:
+        creates: "{{ nceplibs_g2c_path }}/lib"
+
+    ### Step 3: Install NCEPLIBS-bacio ###
+    - name: Download and extract NCEPLIBS-bacio
+      get_url:
+        url: "https://github.com/NOAA-EMC/NCEPLIBS-bacio/archive/refs/tags/v{{ nceplibs_bacio_version }}.tar.gz"
+        dest: "/tmp/NCEPLIBS-bacio-{{ nceplibs_bacio_version }}.tar.gz"
+
+    - name: Extract NCEPLIBS-bacio
+      unarchive:
+        src: "/tmp/NCEPLIBS-bacio-{{ nceplibs_bacio_version }}.tar.gz"
+        dest: "/usr/local/src"
+        remote_src: yes
+
+    - name: Build and install NCEPLIBS-bacio
+      shell: |
+        mkdir -p /usr/local/src/NCEPLIBS-bacio-{{ nceplibs_bacio_version }}/build
+        cd /usr/local/src/NCEPLIBS-bacio-{{ nceplibs_bacio_version }}/build
+        cmake -DCMAKE_INSTALL_PREFIX=/usr/local/src/NCEPLIBS-bacio-{{ nceplibs_bacio_version }} ..
+        make
+        make install
+      args:
+        executable: /bin/bash
+
+    ### Step 2: Install NCEPLIBS-g2
+    - name: Download and extract NCEPLIBS-g2
+      get_url:
+        url: "https://github.com/NOAA-EMC/NCEPLIBS-g2/archive/refs/tags/v{{ nceplibs_g2_version }}.tar.gz"
+        dest: "/tmp/NCEPLIBS-g2-{{ nceplibs_g2_version }}.tar.gz"
+
+    - name: Extract NCEPLIBS-g2
+      unarchive:
+        src: "/tmp/NCEPLIBS-g2-{{ nceplibs_g2_version }}.tar.gz"
+        dest: "/usr/local/src"
+        remote_src: yes
+
+    - name: Build and install NCEPLIBS-g2
+      shell: |
+        mkdir -p {{ nceplibs_g2_path }}/build
+        cd {{ nceplibs_g2_path }}/build
+        cmake -DCMAKE_INSTALL_PREFIX={{ nceplibs_g2_path }} -DCMAKE_PREFIX_PATH="{{ nceplibs_g2c_path }};{{ nceplibs_bacio_path }}" -DUSE_AEC=ON -DBUILD_WITH_W3EMC=OFF .. > /tmp/g2_build.log 2>&1
+        make > /tmp/g2_make.log 2>&1
+        make install > /tmp/g2_install.log 2>&1
+      args:
+        executable: /bin/bash
+
+    - name: Create installation directory
+      file:
+        path: "{{ install_dir }}"
+        state: directory
+        mode: '0755'
+
+    - name: Download wgrib2 source code
+      get_url:
+        url: "https://github.com/NOAA-EMC/wgrib2/archive/refs/tags/v{{ wgrib2_version }}.tar.gz"
+        dest: "{{ install_dir }}/wgrib2.tgz"
+
+    - name: Extract wgrib2 source
+      unarchive:
+        src: "{{ install_dir }}/wgrib2.tgz"
+        dest: "{{ install_dir }}"
+        remote_src: yes
+        
+    # Clean up
+    - name: Find NCEPLIBS temporary directories
+      find:
+        paths: "/tmp/"
+        patterns: "NCEPLIBS*"
+        file_type: directory
+      register: NCEPLIBS_dirs_to_remove
+
+    - name: Debug NCEPLIBS directories to remove
+      debug:
+        var: NCEPLIBS_dirs_to_remove.files
+
+    - name: Delete NCEPLIBS temporary directories
+      file:
+        path: "{{ item.path }}"
+        state: absent
+      loop: "{{ NCEPLIBS_dirs_to_remove.files }}"
+      when: NCEPLIBS_dirs_to_remove.matched > 0
+
+    - name: Find Jasper temporary directories
+      find:
+        paths: "{{ jasper_source_dir }}"
+        patterns: "jasper*"
+        file_type: directory
+      register: jasper_dirs_to_remove
+
+    - name: Debug Jasper directories to remove
+      debug:
+        var: jasper_dirs_to_remove.files
+
+    - name: Delete Jasper temporary directories
+      file:
+        path: "{{ item.path }}"
+        state: absent
+      loop: "{{ jasper_dirs_to_remove.files }}"
+      when: jasper_dirs_to_remove.matched > 0
+
+    - name: Find NCEPLIBS temporary build directories in jasper_build_dir
+      find:
+        paths: "{{ jasper_build_dir }}"
+        patterns: "NCEPLIBS*"
+        file_type: directory
+      register: nceplibs_dirs_to_remove
+
+    - name: Debug NCEPLIBS directories to remove in jasper_build_dir
+      debug:
+        var: nceplibs_dirs_to_remove.files
+
+    - name: Delete NCEPLIBS temporary build directories in jasper_build_dir
+      file:
+        path: "{{ item.path }}"
+        state: absent
+      loop: "{{ nceplibs_dirs_to_remove.files }}"
+      when: nceplibs_dirs_to_remove.matched > 0
