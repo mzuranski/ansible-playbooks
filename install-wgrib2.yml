@@ -3,13 +3,14 @@
   hosts: all
   become: yes
   vars:
+    # Change version info below as needed
     wgrib2_version: "3.5.0"
     nceplibs_g2c_version: "2.1.0"
     nceplibs_g2_version: "4.0.0"
     nceplibs_bacio_version: "2.6.0"
     nceplibs_ip_version: "5.2.0"
     jasper_version: "4.2.4"
-    # 
+    # Below should be left alone past initial configuration
     base_source_dir: "/usr/local/src"
     jasper_source_dir: "{{ base_source_dir }}/jasper-version-{{ jasper_version }}"
     jasper_build_dir: "{{ base_source_dir }}/jasper-version-{{ jasper_version }}-build"  # MUST be outside Jasper source directory!
@@ -148,7 +149,7 @@
       args:
         creates: "{{ nceplibs_g2c_path }}/lib"
 
-    ### Step 3: Install NCEPLIBS-bacio ###
+    # Step 4: Install NCEPLIBS-bacio
     - name: Download and extract NCEPLIBS-bacio
       get_url:
         url: "https://github.com/NOAA-EMC/NCEPLIBS-bacio/archive/refs/tags/v{{ nceplibs_bacio_version }}.tar.gz"
@@ -170,7 +171,7 @@
       args:
         executable: /bin/bash
 
-    ### Step 2: Install NCEPLIBS-g2
+    # Step 5: Install NCEPLIBS-g2
     - name: Download and extract NCEPLIBS-g2
       get_url:
         url: "https://github.com/NOAA-EMC/NCEPLIBS-g2/archive/refs/tags/v{{ nceplibs_g2_version }}.tar.gz"
@@ -192,6 +193,7 @@
       args:
         executable: /bin/bash
 
+    # Step 6: wgrib2 build and installation
     - name: Create installation directory
       file:
         path: "{{ install_dir }}"
@@ -209,7 +211,7 @@
         dest: "{{ install_dir }}"
         remote_src: yes
         
-    # Clean up
+    # Step 7: Clean up
     - name: Find NCEPLIBS temporary directories
       find:
         paths: "/tmp/"
